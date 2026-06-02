@@ -17,10 +17,10 @@ under Tauri's startup.
 The UI never sees the difference. Switching between modes does **not** migrate
 data — the browser build and the Tauri build use independent stores.
 
-## Spec note: banner "+" tag dropdown
+## Spec note: banner "New Tag" button
 
-The build spec describes the banner-level "+" as opening a tag dropdown. There
-is no prompt to assign to in that case, so the global control here lets you
-**create or delete tags** for the whole vault. Per-card "+" buttons still open
-the same dropdown scoped to that prompt and assign on Confirm. Tags can also
+The banner-level button creates a new global tag. It opens a small popover
+with a single text input + Create button (Enter submits, Esc closes). There's
+no prompt to assign to from the banner, so a selection list there would be
+inert — assignment is the job of the per-card "+" dropdown instead. Tags can
 be deleted from the filter row (each tag chip has a small `×`).

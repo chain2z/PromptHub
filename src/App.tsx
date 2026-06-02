@@ -4,6 +4,7 @@ import { PromptCard } from "./components/PromptCard";
 import { PromptForm, type PromptFormValues } from "./components/PromptForm";
 import { SearchBar } from "./components/SearchBar";
 import { SortControl } from "./components/SortControl";
+import { TagCreatePopover } from "./components/TagCreatePopover";
 import { TagDropdown } from "./components/TagDropdown";
 import { TagFilter } from "./components/TagFilter";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -16,7 +17,7 @@ import { applyTheme, readTheme, writeTheme } from "./lib/theme";
 import type { Prompt, SearchField, SortMode, Tag, Theme } from "./types";
 
 type TagDropdownTarget = {
-  promptId: string | null; // null = global (from banner "+")
+  promptId: string;
   anchor: DOMRect;
 };
 
@@ -45,6 +46,7 @@ export function App() {
   } | null>(null);
 
   const [tagDropdown, setTagDropdown] = useState<TagDropdownTarget | null>(null);
+  const [tagCreateAnchor, setTagCreateAnchor] = useState<DOMRect | null>(null);
   const globalAddTagBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // ---------- init ----------
@@ -261,14 +263,13 @@ export function App() {
     setTagDropdown({ promptId, anchor });
   };
 
-  const openGlobalTagDropdown = () => {
+  const openTagCreatePopover = () => {
     const rect = globalAddTagBtnRef.current?.getBoundingClientRect();
-    if (rect) setTagDropdown({ promptId: null, anchor: rect });
+    if (rect) setTagCreateAnchor(rect);
   };
 
   const dropdownInitialSelected = useMemo(() => {
     if (!tagDropdown) return [];
-    if (tagDropdown.promptId === null) return [];
     const p = prompts.find((x) => x.id === tagDropdown.promptId);
     return p?.tagIds ?? [];
   }, [tagDropdown, prompts]);
@@ -305,9 +306,9 @@ export function App() {
           <button
             ref={globalAddTagBtnRef}
             type="button"
-            onClick={openGlobalTagDropdown}
-            title="Manage tags"
-            aria-label="Manage tags"
+            onClick={openTagCreatePopover}
+            title="Create a new tag"
+            aria-label="Create a new tag"
             className="inline-flex h-9 items-center gap-1 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
           >
             <svg
@@ -323,7 +324,7 @@ export function App() {
             >
               <path d="M12 5v14M5 12h14" />
             </svg>
-            Tag
+            New Tag
           </button>
 
           <button
@@ -461,15 +462,17 @@ export function App() {
           const target = tagDropdown;
           setTagDropdown(null);
           if (!target) return;
-          if (target.promptId) {
-            await handleSetPromptTags(target.promptId, selected);
-          } else {
-            // Global "+" tag manager: nothing to assign — tag creation is the
-            // useful operation here, and that already happened inside the
-            // dropdown. We just close it.
-            setToast("Tags updated");
-          }
+          await handleSetPromptTags(target.promptId, selected);
         }}
+      />
+
+      <TagCreatePopover
+        open={tagCreateAnchor !== null}
+        anchorRect={tagCreateAnchor}
+        allTags={tags}
+        onClose={() => setTagCreateAnchor(null)}
+        onCreate={handleCreateTag}
+        onCreated={(tag) => setToast(`Tag "${tag.name}" created`)}
       />
 
       <ConfirmDialog
