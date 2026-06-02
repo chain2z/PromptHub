@@ -1,0 +1,38 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Prompt Vault",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "clipboard-manager:default",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    {
+      "identifier": "sql:allow-load",
+      "allow": [{ "url": "sqlite:vault.db" }]
+    },
+    {
+      "identifier": "sql:allow-execute",
+      "allow": [{ "url": "sqlite:vault.db" }]
+    },
+    {
+      "identifier": "sql:allow-select",
+      "allow": [{ "url": "sqlite:vault.db" }]
+    },
+    {
+      "identifier": "sql:allow-close",
+      "allow": [{ "url": "sqlite:vault.db" }]
+    }
+  ]
+}
