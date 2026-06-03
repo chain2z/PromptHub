@@ -75,6 +75,7 @@ function parseSnapshot(raw: string): VaultSnapshot {
       description: p.description ?? "",
       content: p.content ?? "",
       tagIds: Array.isArray(p.tagIds) ? p.tagIds : [],
+      isFavorite: Boolean((p as Partial<Prompt>).isFavorite),
       createdAt: p.createdAt ?? new Date().toISOString(),
       updatedAt: p.updatedAt ?? new Date().toISOString(),
     }));

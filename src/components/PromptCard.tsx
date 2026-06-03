@@ -8,6 +8,7 @@ type Props = {
   onCopy: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onToggleFavorite: () => void;
   onOpenTagDropdown: (anchor: DOMRect) => void;
 };
 
@@ -39,6 +40,7 @@ export function PromptCard({
   onCopy,
   onEdit,
   onDelete,
+  onToggleFavorite,
   onOpenTagDropdown,
 }: Props) {
   const [justCopied, setJustCopied] = useState(false);
@@ -76,6 +78,32 @@ export function PromptCard({
             {prompt.description}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={onToggleFavorite}
+          aria-label={prompt.isFavorite ? "Remove from favorites" : "Mark as favorite"}
+          aria-pressed={prompt.isFavorite}
+          title={prompt.isFavorite ? "Remove from favorites" : "Mark as favorite"}
+          className={
+            prompt.isFavorite
+              ? "shrink-0 rounded-full p-1.5 text-red-500 transition hover:bg-red-50 dark:hover:bg-red-900/30"
+              : "shrink-0 rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-red-500 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-red-400"
+          }
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill={prompt.isFavorite ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+        </button>
       </div>
 
       <div className="mb-3 mt-2 flex flex-wrap items-center gap-1.5">

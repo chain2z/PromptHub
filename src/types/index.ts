@@ -9,6 +9,7 @@ export type Prompt = {
   description: string;
   content: string;
   tagIds: string[];
+  isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
 };

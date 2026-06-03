@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { FavoriteFilter } from "./components/FavoriteFilter";
 import { PromptCard } from "./components/PromptCard";
 import { PromptForm, type PromptFormValues } from "./components/PromptForm";
 import { SearchBar } from "./components/SearchBar";
@@ -29,6 +30,7 @@ export function App() {
 
   const [query, setQuery] = useState("");
   const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("recent");
 
   const [theme, setTheme] = useState<Theme>("light");
@@ -89,7 +91,7 @@ export function App() {
   // ---------- mutations ----------
   const handleCreate = useCallback(async (values: PromptFormValues) => {
     const store = await getStore();
-    const created = await store.createPrompt(values);
+    const created = await store.createPrompt({ ...values, isFavorite: false });
     setPrompts((prev) => [created, ...prev]);
     setFormOpen(false);
     setEditing(null);
@@ -150,6 +152,25 @@ export function App() {
     },
     []
   );
+
+  const handleToggleFavorite = useCallback(async (prompt: Prompt) => {
+    const store = await getStore();
+    const updated = await store.setFavorite(prompt.id, !prompt.isFavorite);
+    setPrompts((prev) => prev.map((p) => (p.id === prompt.id ? updated : p)));
+  }, []);
+
+  const handleRenameTag = useCallback(async (tagId: string, name: string) => {
+    try {
+      const store = await getStore();
+      const updated = await store.renameTag(tagId, name);
+      setTags((prev) => prev.map((t) => (t.id === tagId ? updated : t)));
+      setToast(`Tag renamed to "${updated.name}"`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Rename failed";
+      setToast(msg);
+      throw err;
+    }
+  }, []);
 
   const handleDeleteTag = (tagId: string) => {
     const tag = tags.find((t) => t.id === tagId);
@@ -224,34 +245,58 @@ export function App() {
   };
 
   // ---------- derived view ----------
-  const filteredByTags = useMemo(() => {
-    if (activeTagIds.length === 0) return prompts;
-    return prompts.filter((p) => activeTagIds.every((id) => p.tagIds.includes(id)));
-  }, [prompts, activeTagIds]);
+  const favoriteCount = useMemo(
+    () => prompts.filter((p) => p.isFavorite).length,
+    [prompts]
+  );
+
+  const filteredByTagsAndFavorites = useMemo(() => {
+    let list = prompts;
+    if (favoritesOnly) list = list.filter((p) => p.isFavorite);
+    if (activeTagIds.length > 0) {
+      list = list.filter((p) => activeTagIds.every((id) => p.tagIds.includes(id)));
+    }
+    return list;
+  }, [prompts, activeTagIds, favoritesOnly]);
 
   const visible = useMemo<{
     items: { prompt: Prompt; matchedField?: SearchField }[];
     relevanceMode: boolean;
   }>(() => {
     const trimmed = query.trim();
+    // Favorites always sort first; secondary sort depends on mode.
+    const favFirst = (a: Prompt, b: Prompt) =>
+      Number(b.isFavorite) - Number(a.isFavorite);
+
     if (trimmed) {
-      const results = searchPrompts(filteredByTags, trimmed);
+      const results = searchPrompts(filteredByTagsAndFavorites, trimmed);
+      // searchPrompts already sorts by relevance desc; re-sort with stable
+      // pass to bubble favorites to the top while preserving relevance within
+      // each bucket.
+      results.sort((a, b) => favFirst(a.prompt, b.prompt));
       return {
         items: results.map((r) => ({ prompt: r.prompt, matchedField: r.field })),
         relevanceMode: true,
       };
     }
-    const sorted = [...filteredByTags];
+    const sorted = [...filteredByTagsAndFavorites];
     if (sortMode === "recent") {
-      sorted.sort(
-        (a, b) =>
+      sorted.sort((a, b) => {
+        const f = favFirst(a, b);
+        if (f !== 0) return f;
+        return (
           new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
+        );
+      });
     } else {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
+      sorted.sort((a, b) => {
+        const f = favFirst(a, b);
+        if (f !== 0) return f;
+        return a.name.localeCompare(b.name);
+      });
     }
     return { items: sorted.map((p) => ({ prompt: p })), relevanceMode: false };
-  }, [filteredByTags, query, sortMode]);
+  }, [filteredByTagsAndFavorites, query, sortMode]);
 
   const toggleActiveTag = (id: string) => {
     setActiveTagIds((prev) =>
@@ -375,13 +420,21 @@ export function App() {
       {/* ===== Body ===== */}
       <main className="mx-auto max-w-6xl px-4 py-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <TagFilter
-            tags={tags}
-            activeTagIds={activeTagIds}
-            onToggle={toggleActiveTag}
-            onClear={() => setActiveTagIds([])}
-            onDeleteTag={handleDeleteTag}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <FavoriteFilter
+              active={favoritesOnly}
+              count={favoriteCount}
+              onToggle={() => setFavoritesOnly((v) => !v)}
+            />
+            <TagFilter
+              tags={tags}
+              activeTagIds={activeTagIds}
+              onToggle={toggleActiveTag}
+              onClear={() => setActiveTagIds([])}
+              onDeleteTag={handleDeleteTag}
+              onRenameTag={handleRenameTag}
+            />
+          </div>
           <div className="flex items-center gap-3">
             <SortControl
               value={sortMode}
@@ -432,6 +485,7 @@ export function App() {
                 setFormOpen(true);
               }}
               onDelete={() => handleDelete(prompt)}
+              onToggleFavorite={() => handleToggleFavorite(prompt)}
               onOpenTagDropdown={(anchor) => openTagDropdownForPrompt(prompt.id, anchor)}
             />
           ))}

@@ -14,7 +14,9 @@ export interface DataStore {
   updatePrompt(id: string, patch: Partial<Omit<Prompt, "id" | "createdAt">>): Promise<Prompt>;
   deletePrompt(id: string): Promise<void>;
   setPromptTags(promptId: string, tagIds: string[]): Promise<void>;
+  setFavorite(promptId: string, isFavorite: boolean): Promise<Prompt>;
   createTag(name: string): Promise<Tag>;
+  renameTag(id: string, name: string): Promise<Tag>;
   deleteTag(id: string): Promise<void>;
   importSnapshot(snapshot: VaultSnapshot, skipDuplicateNames: boolean): Promise<{
     imported: number;
@@ -50,8 +52,8 @@ class SqliteStore implements DataStore {
       name: string;
     }>;
     const promptRows = (await this.db.select(
-      "SELECT id, name, description, content, created_at as createdAt, updated_at as updatedAt FROM prompts"
-    )) as Array<Omit<Prompt, "tagIds">>;
+      "SELECT id, name, description, content, is_favorite as isFavorite, created_at as createdAt, updated_at as updatedAt FROM prompts"
+    )) as Array<Omit<Prompt, "tagIds" | "isFavorite"> & { isFavorite: number | boolean }>;
     const linkRows = (await this.db.select(
       "SELECT prompt_id as promptId, tag_id as tagId FROM prompt_tags"
     )) as Array<{ promptId: string; tagId: string }>;
@@ -63,6 +65,7 @@ class SqliteStore implements DataStore {
     }
     const prompts: Prompt[] = promptRows.map((p) => ({
       ...p,
+      isFavorite: Boolean(p.isFavorite),
       tagIds: tagsByPrompt.get(p.id) ?? [],
     }));
     return { prompts, tags: tagRows };
@@ -72,8 +75,8 @@ class SqliteStore implements DataStore {
     const id = uuid();
     const now = nowIso();
     await this.db.execute(
-      "INSERT INTO prompts (id, name, description, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, input.name, input.description, input.content, now, now]
+      "INSERT INTO prompts (id, name, description, content, is_favorite, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, input.name, input.description, input.content, input.isFavorite ? 1 : 0, now, now]
     );
     for (const tagId of input.tagIds) {
       await this.db.execute(
@@ -89,9 +92,9 @@ class SqliteStore implements DataStore {
     patch: Partial<Omit<Prompt, "id" | "createdAt">>
   ): Promise<Prompt> {
     const existingRows = (await this.db.select(
-      "SELECT id, name, description, content, created_at as createdAt, updated_at as updatedAt FROM prompts WHERE id = ?",
+      "SELECT id, name, description, content, is_favorite as isFavorite, created_at as createdAt, updated_at as updatedAt FROM prompts WHERE id = ?",
       [id]
-    )) as Array<Omit<Prompt, "tagIds">>;
+    )) as Array<Omit<Prompt, "tagIds" | "isFavorite"> & { isFavorite: number | boolean }>;
     const existing = existingRows[0];
     if (!existing) throw new Error("Prompt not found");
     const now = nowIso();
@@ -99,10 +102,11 @@ class SqliteStore implements DataStore {
       name: patch.name ?? existing.name,
       description: patch.description ?? existing.description,
       content: patch.content ?? existing.content,
+      isFavorite: patch.isFavorite ?? Boolean(existing.isFavorite),
     };
     await this.db.execute(
-      "UPDATE prompts SET name = ?, description = ?, content = ?, updated_at = ? WHERE id = ?",
-      [next.name, next.description, next.content, now, id]
+      "UPDATE prompts SET name = ?, description = ?, content = ?, is_favorite = ?, updated_at = ? WHERE id = ?",
+      [next.name, next.description, next.content, next.isFavorite ? 1 : 0, now, id]
     );
     if (patch.tagIds) {
       await this.setPromptTags(id, patch.tagIds);
@@ -118,6 +122,24 @@ class SqliteStore implements DataStore {
       updatedAt: now,
       tagIds: linkRows.map((r) => r.tagId),
     };
+  }
+
+  async setFavorite(promptId: string, isFavorite: boolean): Promise<Prompt> {
+    return this.updatePrompt(promptId, { isFavorite });
+  }
+
+  async renameTag(id: string, name: string): Promise<Tag> {
+    const trimmed = normalizeTagName(name);
+    if (!trimmed) throw new Error("Tag name cannot be empty");
+    const conflict = (await this.db.select(
+      "SELECT id, name FROM tags WHERE LOWER(name) = LOWER(?) AND id != ?",
+      [trimmed, id]
+    )) as Tag[];
+    if (conflict[0]) {
+      throw new Error(`A tag named "${trimmed}" already exists.`);
+    }
+    await this.db.execute("UPDATE tags SET name = ? WHERE id = ?", [trimmed, id]);
+    return { id, name: trimmed };
   }
 
   async deletePrompt(id: string): Promise<void> {
@@ -186,6 +208,7 @@ class SqliteStore implements DataStore {
         description: p.description,
         content: p.content,
         tagIds: mappedTagIds,
+        isFavorite: Boolean(p.isFavorite),
       });
       existingPromptNames.add(p.name.trim().toLowerCase());
       imported++;
@@ -206,7 +229,14 @@ class LocalStorageStore implements DataStore {
       if (raw) {
         const parsed = JSON.parse(raw) as VaultSnapshot;
         if (parsed && Array.isArray(parsed.prompts) && Array.isArray(parsed.tags)) {
-          this.state = parsed;
+          // Backfill isFavorite for data saved before this field existed.
+          this.state = {
+            ...parsed,
+            prompts: parsed.prompts.map((p) => ({
+              ...p,
+              isFavorite: Boolean((p as Partial<Prompt>).isFavorite),
+            })),
+          };
         }
       }
     } catch {
@@ -233,6 +263,7 @@ class LocalStorageStore implements DataStore {
       description: input.description,
       content: input.content,
       tagIds: [...input.tagIds],
+      isFavorite: Boolean(input.isFavorite),
       createdAt: now,
       updatedAt: now,
     };
@@ -273,6 +304,36 @@ class LocalStorageStore implements DataStore {
       updatedAt: nowIso(),
     };
     this.flush();
+  }
+
+  async setFavorite(promptId: string, isFavorite: boolean): Promise<Prompt> {
+    const idx = this.state.prompts.findIndex((p) => p.id === promptId);
+    if (idx < 0) throw new Error("Prompt not found");
+    const next: Prompt = {
+      ...this.state.prompts[idx],
+      isFavorite,
+      updatedAt: nowIso(),
+    };
+    this.state.prompts[idx] = next;
+    this.flush();
+    return next;
+  }
+
+  async renameTag(id: string, name: string): Promise<Tag> {
+    const trimmed = normalizeTagName(name);
+    if (!trimmed) throw new Error("Tag name cannot be empty");
+    const conflict = this.state.tags.find(
+      (t) => t.id !== id && sameTagName(t.name, trimmed)
+    );
+    if (conflict) {
+      throw new Error(`A tag named "${trimmed}" already exists.`);
+    }
+    const idx = this.state.tags.findIndex((t) => t.id === id);
+    if (idx < 0) throw new Error("Tag not found");
+    const next: Tag = { id, name: trimmed };
+    this.state.tags[idx] = next;
+    this.flush();
+    return next;
   }
 
   async createTag(name: string): Promise<Tag> {
@@ -324,6 +385,7 @@ class LocalStorageStore implements DataStore {
         description: p.description,
         content: p.content,
         tagIds: mappedTagIds,
+        isFavorite: Boolean(p.isFavorite),
       });
       existingNames.add(p.name.trim().toLowerCase());
       imported++;
