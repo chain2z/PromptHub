@@ -125,7 +125,27 @@ class SqliteStore implements DataStore {
   }
 
   async setFavorite(promptId: string, isFavorite: boolean): Promise<Prompt> {
-    return this.updatePrompt(promptId, { isFavorite });
+    // Favorite is metadata, not a content edit — leave updated_at untouched
+    // so the "last edited" timestamp on cards stays stable.
+    await this.db.execute(
+      "UPDATE prompts SET is_favorite = ? WHERE id = ?",
+      [isFavorite ? 1 : 0, promptId]
+    );
+    const rows = (await this.db.select(
+      "SELECT id, name, description, content, is_favorite as isFavorite, created_at as createdAt, updated_at as updatedAt FROM prompts WHERE id = ?",
+      [promptId]
+    )) as Array<Omit<Prompt, "tagIds" | "isFavorite"> & { isFavorite: number | boolean }>;
+    const row = rows[0];
+    if (!row) throw new Error("Prompt not found");
+    const linkRows = (await this.db.select(
+      "SELECT tag_id as tagId FROM prompt_tags WHERE prompt_id = ?",
+      [promptId]
+    )) as Array<{ tagId: string }>;
+    return {
+      ...row,
+      isFavorite: Boolean(row.isFavorite),
+      tagIds: linkRows.map((r) => r.tagId),
+    };
   }
 
   async renameTag(id: string, name: string): Promise<Tag> {
@@ -309,10 +329,10 @@ class LocalStorageStore implements DataStore {
   async setFavorite(promptId: string, isFavorite: boolean): Promise<Prompt> {
     const idx = this.state.prompts.findIndex((p) => p.id === promptId);
     if (idx < 0) throw new Error("Prompt not found");
+    // Favorite is metadata, not a content edit — leave updatedAt untouched.
     const next: Prompt = {
       ...this.state.prompts[idx],
       isFavorite,
-      updatedAt: nowIso(),
     };
     this.state.prompts[idx] = next;
     this.flush();
